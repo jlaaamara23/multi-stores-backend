@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: multi-stores-backend
+    runtime: java
+    plan: free
+    buildCommand: "./mvnw clean package -DskipTests"
+    startCommand: "java -jar target/multi-stores-0.0.1-SNAPSHOT.jar"
+    envVars:
+      - key: JAVA_VERSION
+        value: 17
