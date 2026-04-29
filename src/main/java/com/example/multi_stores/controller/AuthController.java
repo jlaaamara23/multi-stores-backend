@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
@@ -122,7 +123,9 @@ public class AuthController {
         }
         user = userRepository.save(user);
         if (!isAdminSignUp) {
-            emailService.sendVerificationEmail(user.getEmail(), user.getVerificationToken());
+            final String userEmail = user.getEmail();
+            final String verificationToken = user.getVerificationToken();
+            CompletableFuture.runAsync(() -> emailService.sendVerificationEmail(userEmail, verificationToken));
             resendLastSent.put(user.getEmail().toLowerCase(), System.currentTimeMillis());
         }
         if (isAdminSignUp) {
@@ -180,9 +183,12 @@ public class AuthController {
             user.setVerificationToken(newToken);
             user.setVerificationTokenExpiry(Instant.now().plusSeconds(24 * 3600));
             userRepository.save(user);
-            emailService.sendVerificationEmail(user.getEmail(), newToken);
+            final String userEmail = user.getEmail();
+            CompletableFuture.runAsync(() -> emailService.sendVerificationEmail(userEmail, newToken));
         } else {
-            emailService.sendVerificationEmail(user.getEmail(), user.getVerificationToken());
+            final String userEmail = user.getEmail();
+            final String verificationToken = user.getVerificationToken();
+            CompletableFuture.runAsync(() -> emailService.sendVerificationEmail(userEmail, verificationToken));
         }
         resendLastSent.put(emailLower, now);
         return ResponseEntity.ok(Map.of("message", "Verification email sent. Please check your inbox."));
