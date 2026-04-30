@@ -33,22 +33,24 @@ public class EmailService {
      * Sends a verification email with a link. Uses Gmail SMTP when configured.
      * If app.mail.from is empty, skips sending (e.g. for local dev without mail config).
      */
-    public void sendVerificationEmail(String toEmail, String verificationToken) {
+    public boolean sendVerificationEmail(String toEmail, String verificationToken) {
         if (mailSender == null || fromEmail == null || fromEmail.isBlank()) {
             log.warn("Mail not configured. Verification email not sent to {}", toEmail);
-            return;
+            return false;
         }
         String verifyUrl = frontendUrl + "/verify-email?token=" + verificationToken;
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(fromEmail);
         msg.setTo(toEmail);
         msg.setSubject("Verify your email - جيب");
-        msg.setText("Please verify your email by clicking the link below:\n\n" + verifyUrl + "\n\nThis link expires in 24 hours.");
+        msg.setText("Please verify your email by clicking the link below:\n\n" + verifyUrl + "\n\nThis link expires in 2 hours.");
         try {
             mailSender.send(msg);
             log.info("Verification email sent to {}", toEmail);
+            return true;
         } catch (Exception e) {
             log.error("Failed to send verification email to {}: {}", toEmail, e.getMessage());
+            return false;
         }
     }
 

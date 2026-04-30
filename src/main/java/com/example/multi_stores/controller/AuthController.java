@@ -16,13 +16,11 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
@@ -30,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AuthController {
 
     private static final long RESEND_COOLDOWN_SECONDS = 60;
+    private static final long VERIFICATION_EXPIRY_HOURS = 2;
     private static final ConcurrentHashMap<String, Long> resendLastSent = new ConcurrentHashMap<>();
 
     private final AuthenticationManager authenticationManager;
@@ -37,9 +36,6 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
-
-    @Value("${app.admin-secret:}")
-    private String adminSecret;
 
     public AuthController(AuthenticationManager authenticationManager,
                          UserRepository userRepository,
@@ -98,42 +94,36 @@ public class AuthController {
         if (email == null || password == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Email and password are required"));
         }
-        if (userRepository.existsByEmail(email)) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Email already registered"));
+        User existing = userRepository.findByEmail(email).orElse(null);
+        if (existing != null) {
+            boolean pendingExpired = !existing.isEmailVerified()
+                    && existing.getVerificationTokenExpiry() != null
+                    && existing.getVerificationTokenExpiry().isBefore(Instant.now());
+            if (pendingExpired) {
+                userRepository.delete(existing);
+            } else {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email already registered"));
+            }
         }
         String phone = body.get("phone");
         if (phone != null) phone = phone.trim();
         if (phone == null || phone.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Phone is required"));
         }
-        String secret = body.get("adminSecret");
-        boolean isAdminSignUp = adminSecret != null && !adminSecret.isEmpty()
-                && secret != null && adminSecret.equals(secret);
-        UserRole role = isAdminSignUp ? UserRole.ADMIN : UserRole.CUSTOMER;
+        UserRole role = UserRole.CUSTOMER;
         User user = new User(null, email, passwordEncoder.encode(password), role, phone);
-        if (isAdminSignUp) {
-            user.setEmailVerified(true);
-            user.setVerificationToken(null);
-            user.setVerificationTokenExpiry(null);
-        } else {
-            user.setEmailVerified(false);
-            String verificationToken = UUID.randomUUID().toString().replace("-", "");
-            user.setVerificationToken(verificationToken);
-            user.setVerificationTokenExpiry(Instant.now().plusSeconds(24 * 3600));
-        }
-        user = userRepository.save(user);
-        if (!isAdminSignUp) {
-            final String userEmail = user.getEmail();
-            final String verificationToken = user.getVerificationToken();
-            CompletableFuture.runAsync(() -> emailService.sendVerificationEmail(userEmail, verificationToken));
-            resendLastSent.put(user.getEmail().toLowerCase(), System.currentTimeMillis());
-        }
-        if (isAdminSignUp) {
-            return ResponseEntity.status(201).body(Map.of(
-                    "message", "Admin account created. You can log in.",
-                    "email", user.getEmail()
+        user.setEmailVerified(false);
+        String verificationToken = UUID.randomUUID().toString().replace("-", "");
+        user.setVerificationToken(verificationToken);
+        user.setVerificationTokenExpiry(Instant.now().plusSeconds(VERIFICATION_EXPIRY_HOURS * 3600));
+        boolean sent = emailService.sendVerificationEmail(user.getEmail(), verificationToken);
+        if (!sent) {
+            return ResponseEntity.status(503).body(Map.of(
+                    "error", "Registration failed because verification email could not be sent. Please try again later."
             ));
         }
+        user = userRepository.save(user);
+        resendLastSent.put(user.getEmail().toLowerCase(), System.currentTimeMillis());
         return ResponseEntity.status(201).body(Map.of(
                 "message", "Registration successful. Please check your email to verify your account.",
                 "email", user.getEmail()
@@ -181,14 +171,20 @@ public class AuthController {
         if (user.getVerificationToken() == null || user.getVerificationTokenExpiry() == null || user.getVerificationTokenExpiry().isBefore(Instant.now())) {
             String newToken = UUID.randomUUID().toString().replace("-", "");
             user.setVerificationToken(newToken);
-            user.setVerificationTokenExpiry(Instant.now().plusSeconds(24 * 3600));
+            user.setVerificationTokenExpiry(Instant.now().plusSeconds(VERIFICATION_EXPIRY_HOURS * 3600));
             userRepository.save(user);
             final String userEmail = user.getEmail();
-            CompletableFuture.runAsync(() -> emailService.sendVerificationEmail(userEmail, newToken));
+            final boolean sent = emailService.sendVerificationEmail(userEmail, newToken);
+            if (!sent) {
+                return ResponseEntity.status(503).body(Map.of("error", "Failed to send verification email. Please try again later."));
+            }
         } else {
             final String userEmail = user.getEmail();
             final String verificationToken = user.getVerificationToken();
-            CompletableFuture.runAsync(() -> emailService.sendVerificationEmail(userEmail, verificationToken));
+            final boolean sent = emailService.sendVerificationEmail(userEmail, verificationToken);
+            if (!sent) {
+                return ResponseEntity.status(503).body(Map.of("error", "Failed to send verification email. Please try again later."));
+            }
         }
         resendLastSent.put(emailLower, now);
         return ResponseEntity.ok(Map.of("message", "Verification email sent. Please check your inbox."));
