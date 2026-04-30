@@ -39,7 +39,7 @@ public class EmailService {
             log.warn("Brevo API not configured. Verification email not sent to {}", toEmail);
             return false;
         }
-        String verifyUrl = frontendUrl + "/verify-email?token=" + verificationToken;
+        String verifyUrl = buildVerifyUrl(verificationToken);
         String text = "Please verify your email by clicking the link below:\n\n" + verifyUrl + "\n\nThis link expires in 2 hours.";
         try {
             sendViaBrevo(toEmail, "Verify your email - جيب", text, null);
@@ -92,5 +92,13 @@ public class EmailService {
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new RestClientException("Brevo API responded with status " + response.getStatusCode().value());
         }
+    }
+
+    private String buildVerifyUrl(String verificationToken) {
+        String base = frontendUrl != null ? frontendUrl.trim() : "";
+        if (base.endsWith("/")) {
+            base = base.replaceAll("/+$", "");
+        }
+        return base + "/verify-email?token=" + verificationToken;
     }
 }
