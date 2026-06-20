@@ -8,3 +8,11 @@ services:
     envVars:
       - key: JAVA_VERSION
         value: 17
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: CLOUDINARY_CLOUD_NAME
+        value: dnmufg4wy
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
