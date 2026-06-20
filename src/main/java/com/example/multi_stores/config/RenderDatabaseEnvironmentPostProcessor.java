@@ -12,8 +12,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Converts Render's DATABASE_URL (postgres://...) into a JDBC URL with SSL enabled.
- * Render Postgres rejects non-SSL connections with EOFException during authentication.
+ * Ensures Render PostgreSQL connections use SSL.
+ * Render rejects non-SSL connections with EOFException during authentication.
  */
 public class RenderDatabaseEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
@@ -21,6 +21,17 @@ public class RenderDatabaseEnvironmentPostProcessor implements EnvironmentPostPr
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
+        Map<String, Object> properties = new HashMap<>();
+
+        String springDatasourceUrl = environment.getProperty("SPRING_DATASOURCE_URL");
+        if (springDatasourceUrl != null && !springDatasourceUrl.isBlank()
+                && springDatasourceUrl.startsWith("jdbc:postgresql:")) {
+            properties.put("spring.datasource.url", withSslMode(springDatasourceUrl));
+            properties.put("spring.datasource.driver-class-name", "org.postgresql.Driver");
+            environment.getPropertySources().addFirst(new MapPropertySource(PROPERTY_SOURCE_NAME, properties));
+            return;
+        }
+
         String databaseUrl = environment.getProperty("DATABASE_URL");
         if (databaseUrl == null || databaseUrl.isBlank()) {
             return;
@@ -41,9 +52,8 @@ public class RenderDatabaseEnvironmentPostProcessor implements EnvironmentPostPr
             String password = URLDecoder.decode(credentials[1], StandardCharsets.UTF_8);
             int port = uri.getPort() > 0 ? uri.getPort() : 5432;
             String path = uri.getPath() != null ? uri.getPath() : "";
-            String jdbcUrl = "jdbc:postgresql://" + uri.getHost() + ":" + port + path + "?sslmode=require";
+            String jdbcUrl = withSslMode("jdbc:postgresql://" + uri.getHost() + ":" + port + path);
 
-            Map<String, Object> properties = new HashMap<>();
             properties.put("spring.datasource.url", jdbcUrl);
             properties.put("spring.datasource.username", username);
             properties.put("spring.datasource.password", password);
@@ -55,5 +65,12 @@ public class RenderDatabaseEnvironmentPostProcessor implements EnvironmentPostPr
         } catch (Exception e) {
             throw new IllegalStateException("Failed to parse DATABASE_URL for Render PostgreSQL", e);
         }
+    }
+
+    private static String withSslMode(String jdbcUrl) {
+        if (jdbcUrl.contains("sslmode=")) {
+            return jdbcUrl;
+        }
+        return jdbcUrl.contains("?") ? jdbcUrl + "&sslmode=require" : jdbcUrl + "?sslmode=require";
     }
 }
