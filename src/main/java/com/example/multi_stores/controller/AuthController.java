@@ -112,20 +112,26 @@ public class AuthController {
         }
         UserRole role = UserRole.CUSTOMER;
         User user = new User(null, email, passwordEncoder.encode(password), role, phone);
-        user.setEmailVerified(false);
         String verificationToken = UUID.randomUUID().toString().replace("-", "");
         user.setVerificationToken(verificationToken);
         user.setVerificationTokenExpiry(Instant.now().plusSeconds(VERIFICATION_EXPIRY_HOURS * 3600));
         boolean sent = emailService.sendVerificationEmail(user.getEmail(), verificationToken);
-        if (!sent) {
-            return ResponseEntity.status(503).body(Map.of(
-                    "error", "Registration failed because verification email could not be sent. Please try again later."
+        if (sent) {
+            user.setEmailVerified(false);
+            user = userRepository.save(user);
+            resendLastSent.put(user.getEmail().toLowerCase(), System.currentTimeMillis());
+            return ResponseEntity.status(201).body(Map.of(
+                    "message", "Registration successful. Please check your email to verify your account.",
+                    "email", user.getEmail()
             ));
         }
+        // Brevo/email not configured or send failed: still create account so deploy/bootstrap can continue.
+        user.setEmailVerified(true);
+        user.setVerificationToken(null);
+        user.setVerificationTokenExpiry(null);
         user = userRepository.save(user);
-        resendLastSent.put(user.getEmail().toLowerCase(), System.currentTimeMillis());
         return ResponseEntity.status(201).body(Map.of(
-                "message", "Registration successful. Please check your email to verify your account.",
+                "message", "Registration successful. Verification email could not be sent, so the account was activated automatically.",
                 "email", user.getEmail()
         ));
     }
