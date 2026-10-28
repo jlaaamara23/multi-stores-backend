@@ -15,6 +15,7 @@ public class ProductResponse {
     private List<String> imageUrls;
     private List<SizeStockDto> sizeStock;
     private List<ColorVariantDto> colorVariants;
+    private String status;
 
     public ProductResponse() {}
 
@@ -46,6 +47,7 @@ public class ProductResponse {
         private List<String> imageUrls;
         private List<SizeStockDto> sizeStock;
         private List<ColorVariantDto> colorVariants;
+        private String status;
 
         private ProductResponseBuilder() {}
 
@@ -59,11 +61,15 @@ public class ProductResponse {
         public ProductResponseBuilder imageUrls(List<String> imageUrls) { this.imageUrls = imageUrls; return this; }
         public ProductResponseBuilder sizeStock(List<SizeStockDto> sizeStock) { this.sizeStock = sizeStock; return this; }
         public ProductResponseBuilder colorVariants(List<ColorVariantDto> colorVariants) { this.colorVariants = colorVariants; return this; }
+        public ProductResponseBuilder status(String status) { this.status = status; return this; }
         public ProductResponse build() {
-            return new ProductResponse(id, name, description, price, stockQuantity, storeId, categoryId, imageUrls, sizeStock, colorVariants);
+            ProductResponse r = new ProductResponse(id, name, description, price, stockQuantity, storeId, categoryId, imageUrls, sizeStock, colorVariants);
+            r.status = status;
+            return r;
         }
     }
 
+    public String getStatus() { return status; }
     public Long getId() { return id; }
     public String getName() { return name; }
     public String getDescription() { return description; }
