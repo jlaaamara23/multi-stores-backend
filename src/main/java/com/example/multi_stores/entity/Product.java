@@ -21,8 +21,14 @@ public class Product {
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    @Column(nullable = false, precision = 10, scale = 2)
+    /** NULL is allowed only for DRAFT products. */
+    @Column(precision = 10, scale = 2)
     private BigDecimal price;
+
+    /** NULL (legacy rows) means PUBLISHED. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", length = 20)
+    private ProductStatus status;
 
     @Column(name = "stock_quantity", nullable = false)
     private Integer stockQuantity;
@@ -58,7 +64,7 @@ public class Product {
         private Long storeId;
         private Long categoryId;
         private String imageUrls;
-
+        private ProductStatus status;
         private ProductBuilder() {}
 
         public ProductBuilder name(String name) { this.name = name; return this; }
@@ -68,6 +74,7 @@ public class Product {
         public ProductBuilder storeId(Long storeId) { this.storeId = storeId; return this; }
         public ProductBuilder categoryId(Long categoryId) { this.categoryId = categoryId; return this; }
         public ProductBuilder imageUrls(String imageUrls) { this.imageUrls = imageUrls; return this; }
+        public ProductBuilder status(ProductStatus status) { this.status = status; return this; }
         public Product build() {
             Product p = new Product();
             p.setName(name);
@@ -77,6 +84,7 @@ public class Product {
             p.setStoreId(storeId);
             p.setCategoryId(categoryId);
             p.setImageUrls(imageUrls);
+            p.setStatus(status != null ? status : ProductStatus.PUBLISHED);
             return p;
         }
     }
@@ -101,4 +109,7 @@ public class Product {
     public void setCategory(Category category) { this.category = category; }
     public String getImageUrls() { return imageUrls; }
     public void setImageUrls(String imageUrls) { this.imageUrls = imageUrls; }
+    public ProductStatus getStatus() { return status; }
+    public void setStatus(ProductStatus status) { this.status = status; }
+    public boolean isPublished() { return ProductStatus.isPublished(status); }
 }
