@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -124,4 +126,62 @@ public class FileStorageService {
                 && h[8] == 'W' && h[9] == 'E' && h[10] == 'B' && h[11] == 'P') return ".webp";
         throw new IllegalArgumentException("Only JPEG, PNG, GIF or WebP images can be uploaded");
     }
+
+    public boolean isCloudinaryEnabled() {
+        return cloudinaryEnabled && cloudinary != null;
+    }
+
+    /**
+     * Lists image secure URLs from a Cloudinary folder (paginated Admin API).
+     * Each entry is [secureUrl, publicId].
+     */
+    @SuppressWarnings("unchecked")
+    public List<CloudinaryAsset> listImagesInFolder(String folder, int maxImages) throws IOException {
+        if (!isCloudinaryEnabled()) {
+            throw new IllegalStateException("Cloudinary is not configured.");
+        }
+        String prefix = folder == null || folder.isBlank() ? "multi-stores/" : folder.trim();
+        if (!prefix.endsWith("/")) {
+            prefix = prefix + "/";
+        }
+        int limit = Math.max(1, Math.min(maxImages, 5000));
+        List<CloudinaryAsset> assets = new ArrayList<>();
+        String nextCursor = null;
+        try {
+            do {
+                int pageSize = Math.min(500, limit - assets.size());
+                Map<String, Object> options = ObjectUtils.asMap(
+                        "type", "upload",
+                        "resource_type", "image",
+                        "prefix", prefix,
+                        "max_results", pageSize
+                );
+                if (nextCursor != null && !nextCursor.isBlank()) {
+                    options.put("next_cursor", nextCursor);
+                }
+                Map<?, ?> result = cloudinary.api().resources(options);
+                Object resourcesObj = result.get("resources");
+                if (resourcesObj instanceof List<?> resources) {
+                    for (Object item : resources) {
+                        if (!(item instanceof Map<?, ?> resource)) continue;
+                        Object url = resource.get("secure_url");
+                        Object publicId = resource.get("public_id");
+                        if (url == null || url.toString().isBlank()) continue;
+                        assets.add(new CloudinaryAsset(
+                                url.toString(),
+                                publicId != null ? publicId.toString() : url.toString()
+                        ));
+                        if (assets.size() >= limit) break;
+                    }
+                }
+                Object cursor = result.get("next_cursor");
+                nextCursor = cursor != null ? cursor.toString() : null;
+            } while (nextCursor != null && !nextCursor.isBlank() && assets.size() < limit);
+        } catch (Exception e) {
+            throw new IOException("Failed to list Cloudinary folder '" + prefix + "': " + e.getMessage(), e);
+        }
+        return assets;
+    }
+
+    public record CloudinaryAsset(String secureUrl, String publicId) {}
 }
