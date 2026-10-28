@@ -23,6 +23,8 @@ import java.util.List;
  *  - Non-destructive: only adds a column/default and replaces CHECK constraints; drops NOT NULL on price.
  *  - Each upgrade runs in one transaction; on any error it is rolled back, logged, and the app still starts
  *    (existing features keep working; only Shoes/Luggage/drafts stay unavailable).
+ *  - A transaction-scoped advisory lock lets only one instance upgrade at a time (e.g. during a rolling deploy),
+ *    and lock_timeout makes a step give up (and roll back) instead of hanging if a table is busy.
  */
 @Component
 @DependsOn("entityManagerFactory")
@@ -59,9 +61,15 @@ public class SchemaUpgrade {
         run("product drafts", this::upgradeDrafts);
     }
 
+    static final long ADVISORY_LOCK_KEY = 2026102801L;
+
     private void run(String name, Runnable step) {
         try {
-            tx.executeWithoutResult(s -> step.run());
+            tx.executeWithoutResult(s -> {
+                jdbc.execute("SET LOCAL lock_timeout = '10s'");
+                jdbc.queryForList("SELECT pg_advisory_xact_lock(" + ADVISORY_LOCK_KEY + ")");
+                step.run();
+            });
         } catch (Exception e) {
             log.error("Schema upgrade '{}' failed and was rolled back: {}", name, e.getMessage());
         }
