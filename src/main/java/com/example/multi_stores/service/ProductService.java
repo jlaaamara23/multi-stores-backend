@@ -1,5 +1,6 @@
 package com.example.multi_stores.service;
 
+import com.example.multi_stores.dto.CloudinaryImportRequest;
 import com.example.multi_stores.dto.ColorVariantDto;
 import com.example.multi_stores.dto.ProductRequest;
 import com.example.multi_stores.dto.ProductResponse;
@@ -17,12 +18,17 @@ import com.example.multi_stores.repository.StoreRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -33,17 +39,20 @@ public class ProductService {
     private final ProductColorVariantRepository productColorVariantRepository;
     private final OrderItemRepository orderItemRepository;
     private final StoreRepository storeRepository;
+    private final FileStorageService fileStorageService;
 
     public ProductService(ProductRepository productRepository,
                          ProductSizeStockRepository productSizeStockRepository,
                          ProductColorVariantRepository productColorVariantRepository,
                          OrderItemRepository orderItemRepository,
-                         StoreRepository storeRepository) {
+                         StoreRepository storeRepository,
+                         FileStorageService fileStorageService) {
         this.productRepository = productRepository;
         this.productSizeStockRepository = productSizeStockRepository;
         this.productColorVariantRepository = productColorVariantRepository;
         this.orderItemRepository = orderItemRepository;
         this.storeRepository = storeRepository;
+        this.fileStorageService = fileStorageService;
     }
 
     public List<ProductResponse> findByStoreId(Long storeId) {
@@ -59,6 +68,72 @@ public class ProductService {
         return productRepository.findByStoreIdAndCategoryId(storeId, categoryId).stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Creates one product per Cloudinary image in a folder (skips URLs already used by this store).
+     */
+    @Transactional
+    public Map<String, Object> importFromCloudinary(CloudinaryImportRequest request) throws IOException {
+        Store store = storeRepository.findById(request.getStoreId())
+                .orElseThrow(() -> new IllegalArgumentException("Store not found: " + request.getStoreId()));
+
+        int maxImages = request.getMaxImages() != null ? request.getMaxImages() : 2000;
+        String folder = request.getFolder() != null && !request.getFolder().isBlank()
+                ? request.getFolder().trim()
+                : "multi-stores";
+        BigDecimal price = request.getDefaultPrice();
+        int stock = request.getDefaultStock() != null ? Math.max(0, request.getDefaultStock()) : 10;
+        String namePrefix = request.getNamePrefix() != null && !request.getNamePrefix().isBlank()
+                ? request.getNamePrefix().trim()
+                : "Product";
+
+        List<FileStorageService.CloudinaryAsset> assets = fileStorageService.listImagesInFolder(folder, maxImages);
+
+        Set<String> existingUrls = new HashSet<>();
+        for (Product product : productRepository.findByStoreId(store.getId())) {
+            if (product.getImageUrls() == null || product.getImageUrls().isBlank()) continue;
+            for (String part : product.getImageUrls().split(",")) {
+                String url = part.trim();
+                if (!url.isEmpty()) existingUrls.add(url);
+            }
+        }
+
+        int imported = 0;
+        int skipped = 0;
+        int index = 1;
+        for (FileStorageService.CloudinaryAsset asset : assets) {
+            if (existingUrls.contains(asset.secureUrl())) {
+                skipped++;
+                continue;
+            }
+            String baseName = asset.publicId();
+            int slash = baseName.lastIndexOf('/');
+            if (slash >= 0 && slash < baseName.length() - 1) {
+                baseName = baseName.substring(slash + 1);
+            }
+            String productName = namePrefix + " " + index + " (" + baseName + ")";
+            ProductRequest productRequest = new ProductRequest();
+            productRequest.setStoreId(store.getId());
+            productRequest.setName(productName);
+            productRequest.setDescription(null);
+            productRequest.setPrice(price);
+            productRequest.setStockQuantity(stock);
+            productRequest.setImageUrls(List.of(asset.secureUrl()));
+            addProduct(productRequest);
+            existingUrls.add(asset.secureUrl());
+            imported++;
+            index++;
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("folder", folder);
+        result.put("found", assets.size());
+        result.put("imported", imported);
+        result.put("skipped", skipped);
+        result.put("storeId", store.getId());
+        result.put("message", "Imported " + imported + " products from Cloudinary (" + skipped + " skipped as duplicates).");
+        return result;
     }
 
     @Transactional
