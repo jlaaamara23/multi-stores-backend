@@ -22,13 +22,17 @@ public class FileStorageService {
     private final Path uploadDir;
     private final Cloudinary cloudinary;
     private final boolean cloudinaryEnabled;
+    /** When true (production), uploads are refused unless Cloudinary is configured: never stored on local disk. */
+    private final boolean requireCloudinary;
 
     public FileStorageService(
             @Value("${app.upload-dir:uploads}") String uploadDirName,
             @Value("${CLOUDINARY_CLOUD_NAME:}") String cloudName,
             @Value("${CLOUDINARY_API_KEY:}") String apiKey,
-            @Value("${CLOUDINARY_API_SECRET:}") String apiSecret
+            @Value("${CLOUDINARY_API_SECRET:}") String apiSecret,
+            @Value("${app.storage.require-cloudinary:false}") boolean requireCloudinary
     ) {
+        this.requireCloudinary = requireCloudinary;
         this.uploadDir = Paths.get(uploadDirName).toAbsolutePath().normalize();
         this.cloudinaryEnabled = cloudName != null && !cloudName.isBlank()
                 && apiKey != null && !apiKey.isBlank()
@@ -44,7 +48,11 @@ public class FileStorageService {
             log.info("Cloudinary image storage enabled.");
         } else {
             this.cloudinary = null;
-            log.warn("Cloudinary is not configured. Falling back to local uploads directory.");
+            if (requireCloudinary) {
+                log.error("Cloudinary is NOT configured (CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET). Image uploads will be refused.");
+            } else {
+                log.warn("Cloudinary is not configured. Falling back to local uploads directory.");
+            }
         }
 
         try {
@@ -64,6 +72,9 @@ public class FileStorageService {
         detectImageExtension(file); // rejects anything that is not a JPEG, PNG, GIF or WebP image
         if (cloudinaryEnabled && cloudinary != null) {
             return storeInCloudinary(file);
+        }
+        if (requireCloudinary) {
+            throw new IllegalStateException("Image storage is not configured: Cloudinary settings are missing, upload refused.");
         }
         return storeLocally(file);
     }
