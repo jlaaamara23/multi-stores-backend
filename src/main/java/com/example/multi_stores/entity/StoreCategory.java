@@ -15,5 +15,7 @@ public enum StoreCategory {
     PETS,        // חיות מחמד
     HEALTH,      // בריאות
     TOOLS,       // כלי עבודה
-    OFFICE       // משרד
+    OFFICE,      // משרד
+    SHOES,       // נעליים
+    LUGGAGE      // מזוודות ונסיעות
 }

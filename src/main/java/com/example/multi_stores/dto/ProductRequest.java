@@ -12,13 +12,16 @@ public class ProductRequest {
 
     private String description;
 
-    @NotNull
+    /** Required when publishing; may be null for drafts. */
     @DecimalMin(value = "0.01")
     private BigDecimal price;
 
-    @NotNull
+    /** Optional; null means 0. */
     @Min(0)
     private Integer stockQuantity;
+
+    /** "DRAFT" or "PUBLISHED". On create, null means PUBLISHED; on update, null keeps the current status. */
+    private String status;
 
     @NotNull
     private Long storeId;
@@ -56,6 +59,8 @@ public class ProductRequest {
     public void setStoreId(Long storeId) { this.storeId = storeId; }
     public Long getCategoryId() { return categoryId; }
     public void setCategoryId(Long categoryId) { this.categoryId = categoryId; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
     public List<String> getImageUrls() { return imageUrls; }
     public void setImageUrls(List<String> imageUrls) { this.imageUrls = imageUrls; }
     public List<SizeStockDto> getSizeStocks() { return sizeStocks; }
