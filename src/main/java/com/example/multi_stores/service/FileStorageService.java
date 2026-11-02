@@ -24,13 +24,17 @@ public class FileStorageService {
     private final Path uploadDir;
     private final Cloudinary cloudinary;
     private final boolean cloudinaryEnabled;
+    /** When true (production), uploads are refused unless Cloudinary is configured: never stored on local disk. */
+    private final boolean requireCloudinary;
 
     public FileStorageService(
             @Value("${app.upload-dir:uploads}") String uploadDirName,
             @Value("${CLOUDINARY_CLOUD_NAME:}") String cloudName,
             @Value("${CLOUDINARY_API_KEY:}") String apiKey,
-            @Value("${CLOUDINARY_API_SECRET:}") String apiSecret
+            @Value("${CLOUDINARY_API_SECRET:}") String apiSecret,
+            @Value("${app.storage.require-cloudinary:false}") boolean requireCloudinary
     ) {
+        this.requireCloudinary = requireCloudinary;
         this.uploadDir = Paths.get(uploadDirName).toAbsolutePath().normalize();
         this.cloudinaryEnabled = cloudName != null && !cloudName.isBlank()
                 && apiKey != null && !apiKey.isBlank()
@@ -46,7 +50,11 @@ public class FileStorageService {
             log.info("Cloudinary image storage enabled.");
         } else {
             this.cloudinary = null;
-            log.warn("Cloudinary is not configured. Falling back to local uploads directory.");
+            if (requireCloudinary) {
+                log.error("Cloudinary is NOT configured (CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET). Image uploads will be refused.");
+            } else {
+                log.warn("Cloudinary is not configured. Falling back to local uploads directory.");
+            }
         }
 
         try {
@@ -63,8 +71,12 @@ public class FileStorageService {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File is empty");
         }
+        detectImageExtension(file); // rejects anything that is not a JPEG, PNG, GIF or WebP image
         if (cloudinaryEnabled && cloudinary != null) {
             return storeInCloudinary(file);
+        }
+        if (requireCloudinary) {
+            throw new IllegalStateException("Image storage is not configured: Cloudinary settings are missing, upload refused.");
         }
         return storeLocally(file);
     }
@@ -89,14 +101,30 @@ public class FileStorageService {
     }
 
     private String storeLocally(MultipartFile file) throws IOException {
-        String originalName = file.getOriginalFilename();
-        String ext = originalName != null && originalName.contains(".")
-                ? originalName.substring(originalName.lastIndexOf('.'))
-                : "";
+        // Extension comes from the detected file type, never from the client's file name.
+        String ext = detectImageExtension(file);
         String filename = UUID.randomUUID().toString() + ext;
         Path target = uploadDir.resolve(filename);
         Files.copy(file.getInputStream(), target);
         return "/uploads/" + filename;
+    }
+
+    /**
+     * Checks the file's first bytes (not its name or declared type) and returns the matching extension.
+     * Only JPEG, PNG, GIF and WebP are accepted.
+     */
+    static String detectImageExtension(MultipartFile file) throws IOException {
+        byte[] h = new byte[12];
+        int n;
+        try (java.io.InputStream in = file.getInputStream()) {
+            n = in.readNBytes(h, 0, h.length);
+        }
+        if (n >= 3 && (h[0] & 0xFF) == 0xFF && (h[1] & 0xFF) == 0xD8 && (h[2] & 0xFF) == 0xFF) return ".jpg";
+        if (n >= 8 && (h[0] & 0xFF) == 0x89 && h[1] == 'P' && h[2] == 'N' && h[3] == 'G') return ".png";
+        if (n >= 6 && h[0] == 'G' && h[1] == 'I' && h[2] == 'F' && h[3] == '8') return ".gif";
+        if (n >= 12 && h[0] == 'R' && h[1] == 'I' && h[2] == 'F' && h[3] == 'F'
+                && h[8] == 'W' && h[9] == 'E' && h[10] == 'B' && h[11] == 'P') return ".webp";
+        throw new IllegalArgumentException("Only JPEG, PNG, GIF or WebP images can be uploaded");
     }
 
     public boolean isCloudinaryEnabled() {
