@@ -16,13 +16,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Sub-categories inside a store (e.g. "evening dresses" inside Clothing).
- * Reading is public; creating and assigning products is admin only.
- * Assigning only changes products' category_id — nothing else on the product.
+ * Categories inside a store (department), two levels deep:
+ * a top-level category (e.g. "Dresses") with sub-categories (e.g. "Evening dresses").
+ * Reading is public; creating, moving and assigning products is admin only.
+ * Assigning only changes products' category_id; moving a category to another store also changes its products' store_id.
  */
 @RestController
 public class CategoryController {
@@ -44,11 +46,11 @@ public class CategoryController {
     public List<Map<String, Object>> list(@PathVariable Long storeId) {
         return categoryRepository.findByStoreId(storeId).stream()
                 .sorted(Comparator.comparing(Category::getId))
-                .map(c -> Map.<String, Object>of("id", c.getId(), "name", c.getName(), "storeId", c.getStoreId()))
+                .map(CategoryController::toMap)
                 .toList();
     }
 
-    public record CreateCategoryRequest(String name) {}
+    public record CreateCategoryRequest(String name, Long parentId) {}
 
     @PostMapping("/api/admin/stores/{storeId}/categories")
     public ResponseEntity<?> create(@PathVariable Long storeId, @RequestBody CreateCategoryRequest request,
@@ -57,15 +59,61 @@ public class CategoryController {
         String name = request == null || request.name() == null ? "" : request.name().trim();
         if (name.isEmpty() || name.length() > 100) return ResponseEntity.badRequest().body(Map.of("error", "Invalid name"));
         if (!storeRepository.existsById(storeId)) return ResponseEntity.badRequest().body(Map.of("error", "Store not found"));
+        Long parentId = request.parentId();
+        if (parentId != null && !isValidParent(parentId, storeId, null)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Parent must be a top-level category in the same store"));
+        }
         // Idempotent: return the existing category with the same name.
         Category existing = categoryRepository.findByStoreId(storeId).stream()
                 .filter(c -> c.getName().equals(name)).findFirst().orElse(null);
         if (existing != null) {
-            return ResponseEntity.ok(Map.of("id", existing.getId(), "name", existing.getName(), "storeId", storeId, "created", false));
+            Map<String, Object> body = toMap(existing);
+            body.put("created", false);
+            return ResponseEntity.ok(body);
         }
-        Category saved = categoryRepository.save(Category.builder().name(name).storeId(storeId).build());
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(Map.of("id", saved.getId(), "name", saved.getName(), "storeId", storeId, "created", true));
+        Category saved = categoryRepository.save(Category.builder().name(name).storeId(storeId).parentId(parentId).build());
+        Map<String, Object> body = toMap(saved);
+        body.put("created", true);
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    public record MoveCategoryRequest(Long storeId, Long parentId) {}
+
+    /**
+     * Places a category under a parent (or top level) and optionally in another store.
+     * When the store changes, the category's products move with it (only their store_id changes).
+     */
+    @PutMapping("/api/admin/categories/{id}")
+    @Transactional
+    public ResponseEntity<?> move(@PathVariable Long id, @RequestBody MoveCategoryRequest request,
+                                  @AuthenticationPrincipal UserDetails userDetails) {
+        if (!isAdmin(userDetails)) return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Admin only"));
+        Category category = categoryRepository.findById(id).orElse(null);
+        if (category == null) return ResponseEntity.notFound().build();
+        Long storeId = request == null || request.storeId() == null ? category.getStoreId() : request.storeId();
+        Long parentId = request == null ? null : request.parentId();
+        if (!storeRepository.existsById(storeId)) return ResponseEntity.badRequest().body(Map.of("error", "Store not found"));
+        boolean hasChildren = categoryRepository.findByStoreId(category.getStoreId()).stream()
+                .anyMatch(c -> id.equals(c.getParentId()));
+        if (hasChildren && (parentId != null || !storeId.equals(category.getStoreId()))) {
+            return ResponseEntity.badRequest().body(Map.of("error", "A category with sub-categories must stay top level in its store"));
+        }
+        if (parentId != null && !isValidParent(parentId, storeId, id)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Parent must be a top-level category in the target store"));
+        }
+        int movedProducts = 0;
+        if (!storeId.equals(category.getStoreId())) {
+            List<Product> products = productRepository.findByStoreIdAndCategoryId(category.getStoreId(), id);
+            for (Product p : products) p.setStoreId(storeId);
+            productRepository.saveAll(products);
+            movedProducts = products.size();
+        }
+        category.setStoreId(storeId);
+        category.setParentId(parentId);
+        categoryRepository.save(category);
+        Map<String, Object> body = toMap(category);
+        body.put("movedProducts", movedProducts);
+        return ResponseEntity.ok(body);
     }
 
     public record AssignRequest(Long categoryId, List<Long> productIds) {}
@@ -93,6 +141,21 @@ public class CategoryController {
         products.forEach(p -> p.setCategoryId(category.getId()));
         productRepository.saveAll(products);
         return ResponseEntity.ok(Map.of("categoryId", category.getId(), "updated", products.size()));
+    }
+
+    private boolean isValidParent(Long parentId, Long storeId, Long selfId) {
+        if (parentId.equals(selfId)) return false;
+        Category parent = categoryRepository.findById(parentId).orElse(null);
+        return parent != null && storeId.equals(parent.getStoreId()) && parent.getParentId() == null;
+    }
+
+    private static Map<String, Object> toMap(Category c) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", c.getId());
+        m.put("name", c.getName());
+        m.put("storeId", c.getStoreId());
+        m.put("parentId", c.getParentId());
+        return m;
     }
 
     private boolean isAdmin(UserDetails userDetails) {
