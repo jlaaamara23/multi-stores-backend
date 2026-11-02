@@ -22,6 +22,10 @@ public class Category {
     @Column(name = "store_id", nullable = false)
     private Long storeId;
 
+    /** Parent category in the same store (null = top level, e.g. "Dresses" above "Evening dresses"). */
+    @Column(name = "parent_id")
+    private Long parentId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id", insertable = false, updatable = false)
     private Store store;

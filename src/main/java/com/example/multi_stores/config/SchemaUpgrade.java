@@ -35,7 +35,7 @@ public class SchemaUpgrade {
     static final List<String> CATEGORIES = List.of(
             "KITCHEN", "SPICES", "GROCERY", "CLOTHING", "WOMEN_UNDERWEAR", "KIDS_UNDERWEAR", "CHILD_GAME",
             "ELECTRONICS", "BEAUTY", "HOME_DECOR", "SPORTS", "PETS", "HEALTH", "TOOLS", "OFFICE",
-            "SHOES", "LUGGAGE");
+            "SHOES", "LUGGAGE", "WOMEN", "MEN");
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;
@@ -97,7 +97,7 @@ public class SchemaUpgrade {
         String list = String.join("', '", CATEGORIES);
         jdbc.execute("ALTER TABLE stores DROP CONSTRAINT IF EXISTS stores_category_check");
         jdbc.execute("ALTER TABLE stores ADD CONSTRAINT stores_category_check CHECK (category IN ('" + list + "'))");
-        log.info("Schema upgrade: store categories now include SHOES and LUGGAGE.");
+        log.info("Schema upgrade: store categories updated to {}.", CATEGORIES);
     }
 
     void upgradeDrafts() {

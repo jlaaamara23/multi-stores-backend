@@ -17,5 +17,7 @@ public enum StoreCategory {
     TOOLS,       // כלי עבודה
     OFFICE,      // משרד
     SHOES,       // נעליים
-    LUGGAGE      // מזוודות ונסיעות
+    LUGGAGE,     // מזוודות ונסיעות
+    WOMEN,       // נשים
+    MEN          // גברים
 }
