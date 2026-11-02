@@ -19,5 +19,6 @@ public enum StoreCategory {
     SHOES,       // נעליים
     LUGGAGE,     // מזוודות ונסיעות
     WOMEN,       // נשים
-    MEN          // גברים
+    MEN,         // גברים
+    KIDS         // ילדים
 }

@@ -35,7 +35,7 @@ public class SchemaUpgrade {
     static final List<String> CATEGORIES = List.of(
             "KITCHEN", "SPICES", "GROCERY", "CLOTHING", "WOMEN_UNDERWEAR", "KIDS_UNDERWEAR", "CHILD_GAME",
             "ELECTRONICS", "BEAUTY", "HOME_DECOR", "SPORTS", "PETS", "HEALTH", "TOOLS", "OFFICE",
-            "SHOES", "LUGGAGE", "WOMEN", "MEN");
+            "SHOES", "LUGGAGE", "WOMEN", "MEN", "KIDS");
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;
