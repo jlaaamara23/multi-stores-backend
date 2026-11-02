@@ -8,6 +8,7 @@ import com.example.multi_stores.dto.SizeStockDto;
 import com.example.multi_stores.entity.Product;
 import com.example.multi_stores.entity.ProductColorVariant;
 import com.example.multi_stores.entity.ProductSizeStock;
+import com.example.multi_stores.entity.ProductStatus;
 import com.example.multi_stores.entity.Store;
 import com.example.multi_stores.entity.UserRole;
 import com.example.multi_stores.repository.ProductColorVariantRepository;
@@ -56,22 +57,51 @@ public class ProductService {
     }
 
     public List<ProductResponse> findByStoreId(Long storeId) {
+        return findByStoreId(storeId, false);
+    }
+
+    /** includeDrafts must only be true for admins. */
+    public List<ProductResponse> findByStoreId(Long storeId, boolean includeDrafts) {
         return productRepository.findByStoreId(storeId).stream()
+                .filter(p -> includeDrafts || p.isPublished())
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
 
     public List<ProductResponse> findByStoreIdAndCategory(Long storeId, Long categoryId) {
+        return findByStoreIdAndCategory(storeId, categoryId, false);
+    }
+
+    public List<ProductResponse> findByStoreIdAndCategory(Long storeId, Long categoryId, boolean includeDrafts) {
         if (categoryId == null) {
-            return findByStoreId(storeId);
+            return findByStoreId(storeId, includeDrafts);
         }
         return productRepository.findByStoreIdAndCategoryId(storeId, categoryId).stream()
+                .filter(p -> includeDrafts || p.isPublished())
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
 
+    static ProductStatus parseStatus(String status) {
+        if (status == null || status.isBlank()) return null;
+        try {
+            return ProductStatus.valueOf(status.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid status: " + status + " (use DRAFT or PUBLISHED)");
+        }
+    }
+
+    static void requirePriceIfPublished(ProductStatus status, java.math.BigDecimal price) {
+        if (ProductStatus.isPublished(status) && (price == null || price.signum() <= 0)) {
+            throw new IllegalArgumentException("Price is required to publish a product");
+        }
+    }
+
     /**
-     * Creates one product per Cloudinary image in a folder (skips URLs already used by this store).
+     * Creates one product per Cloudinary image in a folder.
+     * Safety: products are always created as DRAFT (never published by the import), and an image that is
+     * already used by ANY product in ANY store (main or colour-variant images) is skipped, so existing
+     * products are never duplicated, re-priced or published by this import.
      */
     @Transactional
     public Map<String, Object> importFromCloudinary(CloudinaryImportRequest request) throws IOException {
@@ -90,14 +120,7 @@ public class ProductService {
 
         List<FileStorageService.CloudinaryAsset> assets = fileStorageService.listImagesInFolder(folder, maxImages);
 
-        Set<String> existingUrls = new HashSet<>();
-        for (Product product : productRepository.findByStoreId(store.getId())) {
-            if (product.getImageUrls() == null || product.getImageUrls().isBlank()) continue;
-            for (String part : product.getImageUrls().split(",")) {
-                String url = part.trim();
-                if (!url.isEmpty()) existingUrls.add(url);
-            }
-        }
+        Set<String> existingUrls = imageUrlsInUse();
 
         int imported = 0;
         int skipped = 0;
@@ -120,6 +143,7 @@ public class ProductService {
             productRequest.setPrice(price);
             productRequest.setStockQuantity(stock);
             productRequest.setImageUrls(List.of(asset.secureUrl()));
+            productRequest.setStatus(ProductStatus.DRAFT.name());
             addProduct(productRequest);
             existingUrls.add(asset.secureUrl());
             imported++;
@@ -132,14 +156,32 @@ public class ProductService {
         result.put("imported", imported);
         result.put("skipped", skipped);
         result.put("storeId", store.getId());
-        result.put("message", "Imported " + imported + " products from Cloudinary (" + skipped + " skipped as duplicates).");
+        result.put("message", "Imported " + imported + " products from Cloudinary (" + skipped + " skipped: already used by a product). Imported products are drafts.");
         return result;
+    }
+
+    /** Every image URL used by any product (main images and colour-variant images), across all stores. */
+    private Set<String> imageUrlsInUse() {
+        Set<String> urls = new HashSet<>();
+        java.util.function.Consumer<String> addAll = (csv) -> {
+            if (csv == null || csv.isBlank()) return;
+            for (String part : csv.split(",")) {
+                String url = part.trim();
+                if (!url.isEmpty()) urls.add(url);
+            }
+        };
+        productRepository.findAll().forEach(p -> addAll.accept(p.getImageUrls()));
+        productColorVariantRepository.findAll().forEach(v -> addAll.accept(v.getImageUrls()));
+        return urls;
     }
 
     @Transactional
     public ProductResponse addProduct(ProductRequest request) {
         Store store = storeRepository.findById(request.getStoreId())
                 .orElseThrow(() -> new IllegalArgumentException("Store not found: " + request.getStoreId()));
+        ProductStatus status = parseStatus(request.getStatus());
+        if (status == null) status = ProductStatus.PUBLISHED;
+        requirePriceIfPublished(status, request.getPrice());
         String imageUrlsStr = null;
         if (request.getImageUrls() != null && !request.getImageUrls().isEmpty()) {
             imageUrlsStr = request.getImageUrls().stream()
@@ -163,6 +205,7 @@ public class ProductService {
                 .storeId(store.getId())
                 .categoryId(request.getCategoryId())
                 .imageUrls(imageUrlsStr)
+                .status(status)
                 .build();
         product = productRepository.save(product);
         saveSizeStocks(product.getId(), request.getSizeStocks());
@@ -184,9 +227,46 @@ public class ProductService {
     }
 
     public ProductResponse getById(Long id) {
+        return getById(id, false);
+    }
+
+    /** Drafts are reported as not found unless includeDrafts (admin). */
+    public ProductResponse getById(Long id, boolean includeDrafts) {
         Product product = productRepository.findById(id)
+                .filter(p -> includeDrafts || p.isPublished())
                 .orElseThrow(() -> new IllegalArgumentException("Product not found: " + id));
         return toResponse(product);
+    }
+
+    /** Sets the status of one product. Publishing requires a price. */
+    @Transactional
+    public ProductResponse setStatus(Long productId, ProductStatus status) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new IllegalArgumentException("Product not found: " + productId));
+        if (status == ProductStatus.PUBLISHED && (product.getPrice() == null || product.getPrice().signum() <= 0)) {
+            throw new IllegalStateException("Price is required to publish a product");
+        }
+        product.setStatus(status);
+        return toResponse(productRepository.save(product));
+    }
+
+    /** Publishes each product that has a price; reports the others. */
+    @Transactional
+    public Map<String, Object> publishAll(List<Long> productIds) {
+        List<Long> published = new ArrayList<>();
+        List<Map<String, Object>> failed = new ArrayList<>();
+        for (Long id : productIds == null ? List.<Long>of() : productIds) {
+            try {
+                setStatus(id, ProductStatus.PUBLISHED);
+                published.add(id);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                failed.add(Map.of("id", id, "error", e.getMessage()));
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("published", published);
+        result.put("failed", failed);
+        return result;
     }
 
     @Transactional
@@ -198,6 +278,10 @@ public class ProductService {
         if (userRole != UserRole.ADMIN) {
             throw new IllegalStateException("Only admin can update this product");
         }
+        ProductStatus status = parseStatus(request.getStatus());
+        if (status == null) status = product.getStatus() != null ? product.getStatus() : ProductStatus.PUBLISHED;
+        requirePriceIfPublished(status, request.getPrice());
+        product.setStatus(status);
         product.setName(request.getName());
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
@@ -312,6 +396,7 @@ public class ProductService {
                 .imageUrls(imageUrls)
                 .sizeStock(sizeStock)
                 .colorVariants(colorVariants)
+                .status(product.isPublished() ? ProductStatus.PUBLISHED.name() : ProductStatus.DRAFT.name())
                 .build();
     }
 

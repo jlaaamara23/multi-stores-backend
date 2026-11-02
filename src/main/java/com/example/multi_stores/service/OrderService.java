@@ -60,6 +60,9 @@ public class OrderService {
         for (OrderItemInput input : items) {
             Product product = productRepository.findById(input.getProductId())
                     .orElseThrow(() -> new IllegalArgumentException("Product not found: " + input.getProductId()));
+            if (!product.isPublished() || product.getPrice() == null) {
+                throw new IllegalStateException("Product is not available for sale: " + product.getName());
+            }
             int available = productService.getAvailableQuantity(product.getId(), input.getSize(), input.getColor());
             if (available < input.getQuantity()) {
                 throw new IllegalStateException("Insufficient stock for product: " + product.getName()
