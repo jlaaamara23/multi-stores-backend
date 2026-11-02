@@ -77,10 +77,10 @@ public class CategoryController {
         return ResponseEntity.status(HttpStatus.CREATED).body(body);
     }
 
-    public record MoveCategoryRequest(Long storeId, Long parentId) {}
+    public record MoveCategoryRequest(Long storeId, Long parentId, String name) {}
 
     /**
-     * Places a category under a parent (or top level) and optionally in another store.
+     * Places a category under a parent (or top level), optionally in another store and/or under a new name.
      * When the store changes, the category's products move with it (only their store_id changes).
      */
     @PutMapping("/api/admin/categories/{id}")
@@ -101,6 +101,11 @@ public class CategoryController {
         if (parentId != null && !isValidParent(parentId, storeId, id)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Parent must be a top-level category in the target store"));
         }
+        String name = request == null || request.name() == null ? category.getName() : request.name().trim();
+        if (name.isEmpty() || name.length() > 100) return ResponseEntity.badRequest().body(Map.of("error", "Invalid name"));
+        boolean nameTaken = categoryRepository.findByStoreId(storeId).stream()
+                .anyMatch(c -> !c.getId().equals(id) && c.getName().equals(name));
+        if (nameTaken) return ResponseEntity.badRequest().body(Map.of("error", "A category with this name already exists in the target store"));
         int movedProducts = 0;
         if (!storeId.equals(category.getStoreId())) {
             List<Product> products = productRepository.findByStoreIdAndCategoryId(category.getStoreId(), id);
@@ -110,6 +115,7 @@ public class CategoryController {
         }
         category.setStoreId(storeId);
         category.setParentId(parentId);
+        category.setName(name);
         categoryRepository.save(category);
         Map<String, Object> body = toMap(category);
         body.put("movedProducts", movedProducts);
