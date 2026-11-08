@@ -10,6 +10,9 @@ public class ProductRequest {
     @NotBlank(message = "Product name is required")
     private String name;
 
+    private String nameHe;
+    private String nameAr;
+
     private String description;
 
     /** Required when publishing; may be null for drafts. */
@@ -49,6 +52,11 @@ public class ProductRequest {
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    /** Optional Hebrew and Arabic names; the site falls back to name when missing. */
+    public String getNameHe() { return nameHe; }
+    public void setNameHe(String nameHe) { this.nameHe = nameHe; }
+    public String getNameAr() { return nameAr; }
+    public void setNameAr(String nameAr) { this.nameAr = nameAr; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
     public BigDecimal getPrice() { return price; }

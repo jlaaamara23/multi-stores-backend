@@ -7,6 +7,8 @@ public class ProductResponse {
 
     private Long id;
     private String name;
+    private String nameHe;
+    private String nameAr;
     private String description;
     private BigDecimal price;
     private Integer stockQuantity;
@@ -72,6 +74,11 @@ public class ProductResponse {
     public String getStatus() { return status; }
     public Long getId() { return id; }
     public String getName() { return name; }
+    /** Optional Hebrew and Arabic names; the site falls back to name when missing. */
+    public String getNameHe() { return nameHe; }
+    public void setNameHe(String nameHe) { this.nameHe = nameHe; }
+    public String getNameAr() { return nameAr; }
+    public void setNameAr(String nameAr) { this.nameAr = nameAr; }
     public String getDescription() { return description; }
     public BigDecimal getPrice() { return price; }
     public Integer getStockQuantity() { return stockQuantity; }
