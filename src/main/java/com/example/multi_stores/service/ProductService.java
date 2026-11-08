@@ -207,6 +207,8 @@ public class ProductService {
                 .imageUrls(imageUrlsStr)
                 .status(status)
                 .build();
+        product.setNameHe(blankToNull(request.getNameHe()));
+        product.setNameAr(blankToNull(request.getNameAr()));
         product = productRepository.save(product);
         saveSizeStocks(product.getId(), request.getSizeStocks());
         saveColorVariants(product.getId(), request.getColorVariants());
@@ -283,6 +285,9 @@ public class ProductService {
         requirePriceIfPublished(status, request.getPrice());
         product.setStatus(status);
         product.setName(request.getName());
+        // Translations are kept when an older client sends none.
+        if (request.getNameHe() != null) product.setNameHe(blankToNull(request.getNameHe()));
+        if (request.getNameAr() != null) product.setNameAr(blankToNull(request.getNameAr()));
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
         int totalStock = request.getStockQuantity() != null ? request.getStockQuantity() : 0;
@@ -385,7 +390,7 @@ public class ProductService {
         List<String> imageUrls = parseImageUrls(product.getImageUrls());
         List<SizeStockDto> sizeStock = loadSizeStocks(product.getId());
         List<ColorVariantDto> colorVariants = loadColorVariants(product.getId());
-        return ProductResponse.builder()
+        ProductResponse response = ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
                 .description(product.getDescription())
@@ -398,6 +403,13 @@ public class ProductService {
                 .colorVariants(colorVariants)
                 .status(product.isPublished() ? ProductStatus.PUBLISHED.name() : ProductStatus.DRAFT.name())
                 .build();
+        response.setNameHe(product.getNameHe());
+        response.setNameAr(product.getNameAr());
+        return response;
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     /** Returns available quantity for the product; if size is set, uses size stock; if color is set, uses color variant quantity. */
