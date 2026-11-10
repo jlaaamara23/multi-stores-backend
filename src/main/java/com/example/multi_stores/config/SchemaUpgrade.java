@@ -32,10 +32,8 @@ public class SchemaUpgrade {
 
     private static final Logger log = LoggerFactory.getLogger(SchemaUpgrade.class);
 
-    static final List<String> CATEGORIES = List.of(
-            "KITCHEN", "SPICES", "GROCERY", "CLOTHING", "WOMEN_UNDERWEAR", "KIDS_UNDERWEAR", "CHILD_GAME",
-            "ELECTRONICS", "BEAUTY", "HOME_DECOR", "SPORTS", "PETS", "HEALTH", "TOOLS", "OFFICE",
-            "SHOES", "LUGGAGE", "WOMEN", "MEN", "KIDS");
+    static final List<String> CATEGORIES = java.util.Arrays.stream(com.example.multi_stores.entity.StoreCategory.values())
+            .map(Enum::name).toList();
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbc;
