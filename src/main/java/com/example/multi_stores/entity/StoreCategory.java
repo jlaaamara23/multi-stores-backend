@@ -20,5 +20,6 @@ public enum StoreCategory {
     LUGGAGE,     // מזוודות ונסיעות
     WOMEN,       // נשים
     MEN,         // גברים
-    KIDS         // ילדים
+    KIDS,        // ילדים
+    ACCESSORIES  // אקססוריז
 }
