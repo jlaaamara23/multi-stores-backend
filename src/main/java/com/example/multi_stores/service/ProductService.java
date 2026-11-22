@@ -62,10 +62,9 @@ public class ProductService {
 
     /** includeDrafts must only be true for admins. */
     public List<ProductResponse> findByStoreId(Long storeId, boolean includeDrafts) {
-        return productRepository.findByStoreId(storeId).stream()
+        return toResponses(productRepository.findByStoreId(storeId).stream()
                 .filter(p -> includeDrafts || p.isPublished())
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+                .collect(Collectors.toList()));
     }
 
     public List<ProductResponse> findByStoreIdAndCategory(Long storeId, Long categoryId) {
@@ -76,10 +75,9 @@ public class ProductService {
         if (categoryId == null) {
             return findByStoreId(storeId, includeDrafts);
         }
-        return productRepository.findByStoreIdAndCategoryId(storeId, categoryId).stream()
+        return toResponses(productRepository.findByStoreIdAndCategoryId(storeId, categoryId).stream()
                 .filter(p -> includeDrafts || p.isPublished())
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+                .collect(Collectors.toList()));
     }
 
     static ProductStatus parseStatus(String status) {
@@ -386,10 +384,27 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
+    /** Same as toResponse for each product, but loads all sizes and colour variants in two queries. */
+    private List<ProductResponse> toResponses(List<Product> products) {
+        if (products.isEmpty()) return Collections.emptyList();
+        List<Long> ids = products.stream().map(Product::getId).collect(Collectors.toList());
+        Map<Long, List<SizeStockDto>> sizes = productSizeStockRepository.findByProductIdInOrderBySize(ids).stream()
+                .collect(Collectors.groupingBy(ProductSizeStock::getProductId,
+                        Collectors.mapping(s -> new SizeStockDto(s.getSize(), s.getQuantity()), Collectors.toList())));
+        Map<Long, List<ColorVariantDto>> colors = productColorVariantRepository.findByProductIdInOrderByColor(ids).stream()
+                .collect(Collectors.groupingBy(ProductColorVariant::getProductId,
+                        Collectors.mapping(v -> new ColorVariantDto(v.getColor(), parseImageUrls(v.getImageUrls()), v.getQuantity() != null ? v.getQuantity() : 0), Collectors.toList())));
+        return products.stream()
+                .map(p -> toResponse(p, sizes.getOrDefault(p.getId(), Collections.emptyList()), colors.getOrDefault(p.getId(), Collections.emptyList())))
+                .collect(Collectors.toList());
+    }
+
     private ProductResponse toResponse(Product product) {
+        return toResponse(product, loadSizeStocks(product.getId()), loadColorVariants(product.getId()));
+    }
+
+    private ProductResponse toResponse(Product product, List<SizeStockDto> sizeStock, List<ColorVariantDto> colorVariants) {
         List<String> imageUrls = parseImageUrls(product.getImageUrls());
-        List<SizeStockDto> sizeStock = loadSizeStocks(product.getId());
-        List<ColorVariantDto> colorVariants = loadColorVariants(product.getId());
         ProductResponse response = ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
