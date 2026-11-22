@@ -42,6 +42,13 @@ public class User implements UserDetails {
     @Column(name = "verification_token_expiry")
     private Instant verificationTokenExpiry;
 
+    /** SHA-256 (hex) of the password-reset token sent by email; the token itself is never stored. */
+    @Column(name = "reset_token_hash", length = 64)
+    private String resetTokenHash;
+
+    @Column(name = "reset_token_expiry")
+    private Instant resetTokenExpiry;
+
     /** No-arg constructor required by JPA (when Lombok does not generate @NoArgsConstructor) */
     public User() {}
 
@@ -105,4 +112,9 @@ public class User implements UserDetails {
     public void setVerificationToken(String verificationToken) { this.verificationToken = verificationToken; }
     public Instant getVerificationTokenExpiry() { return verificationTokenExpiry; }
     public void setVerificationTokenExpiry(Instant verificationTokenExpiry) { this.verificationTokenExpiry = verificationTokenExpiry; }
+    public void setPassword(String password) { this.password = password; }
+    public String getResetTokenHash() { return resetTokenHash; }
+    public void setResetTokenHash(String resetTokenHash) { this.resetTokenHash = resetTokenHash; }
+    public Instant getResetTokenExpiry() { return resetTokenExpiry; }
+    public void setResetTokenExpiry(Instant resetTokenExpiry) { this.resetTokenExpiry = resetTokenExpiry; }
 }
