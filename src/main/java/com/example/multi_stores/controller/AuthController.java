@@ -18,7 +18,13 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,6 +36,10 @@ public class AuthController {
     private static final long RESEND_COOLDOWN_SECONDS = 60;
     private static final long VERIFICATION_EXPIRY_HOURS = 2;
     private static final ConcurrentHashMap<String, Long> resendLastSent = new ConcurrentHashMap<>();
+    private static final long RESET_EXPIRY_MINUTES = 60;
+    private static final int MIN_PASSWORD_LENGTH = 8;
+    private static final ConcurrentHashMap<String, Long> resetLastSent = new ConcurrentHashMap<>();
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
@@ -194,5 +204,69 @@ public class AuthController {
         }
         resendLastSent.put(emailLower, now);
         return ResponseEntity.ok(Map.of("message", "Verification email sent. Please check your inbox."));
+    }
+
+    /**
+     * Emails a one-hour password-reset link. Answers the same way whether or not the email exists.
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(@RequestBody Map<String, String> body) {
+        String email = body != null ? body.get("email") : null;
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Email is required"));
+        }
+        Map<String, String> ok = Map.of("message", "If an account exists for this email, a reset link was sent.");
+        String emailLower = email.trim().toLowerCase();
+        long now = System.currentTimeMillis();
+        Long lastSent = resetLastSent.get(emailLower);
+        if (lastSent != null && (now - lastSent) < RESEND_COOLDOWN_SECONDS * 1000L) {
+            return ResponseEntity.ok(ok);
+        }
+        resetLastSent.put(emailLower, now);
+        User user = userRepository.findByEmail(email.trim()).orElse(null);
+        if (user == null) {
+            return ResponseEntity.ok(ok);
+        }
+        byte[] raw = new byte[32];
+        RANDOM.nextBytes(raw);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+        user.setResetTokenHash(sha256(token));
+        user.setResetTokenExpiry(Instant.now().plusSeconds(RESET_EXPIRY_MINUTES * 60));
+        userRepository.save(user);
+        if (!emailService.sendPasswordResetEmail(user.getEmail(), token)) {
+            return ResponseEntity.status(503).body(Map.of("error", "Failed to send the email. Please try again later."));
+        }
+        return ResponseEntity.ok(ok);
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(@RequestBody Map<String, String> body) {
+        String token = body != null ? body.get("token") : null;
+        String password = body != null ? body.get("password") : null;
+        if (token == null || token.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset link"));
+        }
+        if (password == null || password.length() < MIN_PASSWORD_LENGTH) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least " + MIN_PASSWORD_LENGTH + " characters"));
+        }
+        User user = userRepository.findByResetTokenHash(sha256(token.trim())).orElse(null);
+        if (user == null || user.getResetTokenExpiry() == null || user.getResetTokenExpiry().isBefore(Instant.now())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid or expired reset link"));
+        }
+        user.setPassword(passwordEncoder.encode(password));
+        user.setResetTokenHash(null);
+        user.setResetTokenExpiry(null);
+        // Opening the emailed link proves the address is theirs.
+        user.setEmailVerified(true);
+        userRepository.save(user);
+        return ResponseEntity.ok(Map.of("message", "Password changed. You can now log in."));
+    }
+
+    private static String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

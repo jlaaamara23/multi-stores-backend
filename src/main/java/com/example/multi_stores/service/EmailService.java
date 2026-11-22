@@ -52,6 +52,28 @@ public class EmailService {
     }
 
     /**
+     * Sends a one-hour password-reset link via Brevo API.
+     */
+    public boolean sendPasswordResetEmail(String toEmail, String resetToken) {
+        if (!isBrevoConfigured()) {
+            log.warn("Brevo API not configured. Password reset email not sent to {}", toEmail);
+            return false;
+        }
+        String base = frontendUrl != null ? frontendUrl.trim().replaceAll("/+$", "") : "";
+        String resetUrl = base + "/reset-password?token=" + resetToken;
+        String text = "To choose a new password for your JIBI account, open this link:\n\n" + resetUrl
+                + "\n\nThe link expires in 1 hour. If you did not ask for this, ignore this email.";
+        try {
+            sendViaBrevo(toEmail, "Reset your password - JIBI", text, null);
+            log.info("Password reset email sent to {}", toEmail);
+            return true;
+        } catch (RestClientException e) {
+            log.error("Failed to send password reset email to {} via Brevo API: {}", toEmail, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Sends an HTML email (e.g. invoice) via Brevo API.
      */
     public void sendHtmlEmail(String toEmail, String subject, String htmlBody) {
