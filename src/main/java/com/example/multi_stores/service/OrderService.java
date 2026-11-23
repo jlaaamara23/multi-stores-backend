@@ -62,7 +62,7 @@ public class OrderService {
     public static final List<String> FULFILLMENT = List.of("NEW", "PACKED", "SHIPPED", "DELIVERED");
 
     /** Where to deliver; name, city and address are required for new orders from the site. */
-    public record Shipping(String name, String city, String address, String notes) {}
+    public record Shipping(String name, String phone, String city, String address, String notes) {}
 
     @Transactional
     public Order createOrder(Long customerId, Long storeId, List<OrderItemInput> items) {
@@ -129,6 +129,7 @@ public class OrderService {
                 .build();
         if (shipping != null) {
             order.setShippingName(trimTo(shipping.name(), 120));
+            order.setShippingPhone(trimTo(shipping.phone(), 20));
             order.setShippingCity(trimTo(shipping.city(), 80));
             order.setShippingAddress(trimTo(shipping.address(), 200));
             order.setShippingNotes(trimTo(shipping.notes(), 300));
@@ -173,7 +174,7 @@ public class OrderService {
             }
             String html = "<div dir=\"rtl\" style=\"font-family:Arial,sans-serif\">"
                     + "<h2>הזמנה חדשה #" + order.getId() + "</h2>"
-                    + "<p><b>לקוח:</b> " + esc(order.getShippingName()) + " · " + esc(customer != null ? customer.getPhone() : null)
+                    + "<p><b>לקוח:</b> " + esc(order.getShippingName()) + " · " + esc(order.getShippingPhone() != null ? order.getShippingPhone() : customer != null ? customer.getPhone() : null)
                     + " · " + esc(customer != null ? customer.getEmail() : null) + "</p>"
                     + "<p><b>כתובת:</b> " + esc(order.getShippingAddress()) + ", " + esc(order.getShippingCity()) + "</p>"
                     + (order.getShippingNotes() != null ? "<p><b>הערות:</b> " + esc(order.getShippingNotes()) + "</p>" : "")
@@ -439,12 +440,14 @@ public class OrderService {
         public List<AdminOrderItemDetails> getItems() { return items; }
 
         private String shippingName;
+        private String shippingPhone;
         private String shippingCity;
         private String shippingAddress;
         private String shippingNotes;
         private BigDecimal shippingFee;
         private String fulfillment;
         public String getShippingName() { return shippingName; }
+        public String getShippingPhone() { return shippingPhone; }
         public String getShippingCity() { return shippingCity; }
         public String getShippingAddress() { return shippingAddress; }
         public String getShippingNotes() { return shippingNotes; }
@@ -453,6 +456,7 @@ public class OrderService {
 
         AdminOrderDetails withShipping(Order o) {
             this.shippingName = o.getShippingName();
+            this.shippingPhone = o.getShippingPhone();
             this.shippingCity = o.getShippingCity();
             this.shippingAddress = o.getShippingAddress();
             this.shippingNotes = o.getShippingNotes();

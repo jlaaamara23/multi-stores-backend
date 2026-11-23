@@ -48,7 +48,7 @@ public class OrderController {
                     .map(i -> new OrderService.OrderItemInput(i.getProductId(), i.getQuantity(), i.getSize(), i.getColor()))
                     .collect(Collectors.toList());
             Order order = orderService.createOrder(customerId, request.getStoreId(), items, request.getShippingFee(),
-                    new OrderService.Shipping(request.getShipping().getName(), request.getShipping().getCity(),
+                    new OrderService.Shipping(request.getShipping().getName(), request.getShipping().getPhone(), request.getShipping().getCity(),
                             request.getShipping().getAddress(), request.getShipping().getNotes()));
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                     "id", order.getId(),
@@ -168,6 +168,7 @@ public class OrderController {
 
     public static class ShippingDto {
         private String name;
+        private String phone;
         private String city;
         private String address;
         private String notes;
@@ -176,6 +177,8 @@ public class OrderController {
 
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
+        public String getPhone() { return phone; }
+        public void setPhone(String phone) { this.phone = phone; }
         public String getCity() { return city; }
         public void setCity(String city) { this.city = city; }
         public String getAddress() { return address; }

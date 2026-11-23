@@ -37,6 +37,9 @@ public class Order {
     @Column(name = "shipping_name", length = 120)
     private String shippingName;
 
+    @Column(name = "shipping_phone", length = 20)
+    private String shippingPhone;
+
     @Column(name = "shipping_city", length = 80)
     private String shippingCity;
 
@@ -130,6 +133,8 @@ public class Order {
     public void setStore(Store store) { this.store = store; }
     public String getShippingName() { return shippingName; }
     public void setShippingName(String shippingName) { this.shippingName = shippingName; }
+    public String getShippingPhone() { return shippingPhone; }
+    public void setShippingPhone(String shippingPhone) { this.shippingPhone = shippingPhone; }
     public String getShippingCity() { return shippingCity; }
     public void setShippingCity(String shippingCity) { this.shippingCity = shippingCity; }
     public String getShippingAddress() { return shippingAddress; }
