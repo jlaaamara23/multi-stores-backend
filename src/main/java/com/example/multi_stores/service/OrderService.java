@@ -35,6 +35,7 @@ public class OrderService {
     private final UserRepository userRepository;
     private final ProductService productService;
     private final InvoiceService invoiceService;
+    private final EmailService emailService;
 
     public OrderService(OrderRepository orderRepository,
                         OrderItemRepository orderItemRepository,
@@ -42,7 +43,8 @@ public class OrderService {
                         StoreRepository storeRepository,
                         UserRepository userRepository,
                         ProductService productService,
-                        InvoiceService invoiceService) {
+                        InvoiceService invoiceService,
+                        EmailService emailService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.productRepository = productRepository;
@@ -50,20 +52,26 @@ public class OrderService {
         this.userRepository = userRepository;
         this.productService = productService;
         this.invoiceService = invoiceService;
+        this.emailService = emailService;
     }
 
     /** Delivery fee charged once per checkout when the whole cart is below FREE_SHIPPING_FROM. */
     public static final BigDecimal SHIPPING_FEE = new BigDecimal("50");
     public static final BigDecimal FREE_SHIPPING_FROM = new BigDecimal("500");
 
+    public static final List<String> FULFILLMENT = List.of("NEW", "PACKED", "SHIPPED", "DELIVERED");
+
+    /** Where to deliver; name, city and address are required for new orders from the site. */
+    public record Shipping(String name, String phone, String city, String address, String notes) {}
+
     @Transactional
     public Order createOrder(Long customerId, Long storeId, List<OrderItemInput> items) {
-        return createOrder(customerId, storeId, items, null);
+        return createOrder(customerId, storeId, items, null, null);
     }
 
     /** shippingFee may only be empty, 0 or SHIPPING_FEE; it is added to this order's total. */
     @Transactional
-    public Order createOrder(Long customerId, Long storeId, List<OrderItemInput> items, BigDecimal shippingFee) {
+    public Order createOrder(Long customerId, Long storeId, List<OrderItemInput> items, BigDecimal shippingFee, Shipping shipping) {
         if (shippingFee != null && shippingFee.signum() != 0 && shippingFee.compareTo(SHIPPING_FEE) != 0) {
             throw new IllegalArgumentException("Invalid shipping fee");
         }
@@ -119,6 +127,15 @@ public class OrderService {
                 .status(OrderStatus.PENDING)
                 .createdAt(Instant.now())
                 .build();
+        if (shipping != null) {
+            order.setShippingName(trimTo(shipping.name(), 120));
+            order.setShippingPhone(trimTo(shipping.phone(), 20));
+            order.setShippingCity(trimTo(shipping.city(), 80));
+            order.setShippingAddress(trimTo(shipping.address(), 200));
+            order.setShippingNotes(trimTo(shipping.notes(), 300));
+        }
+        order.setShippingFee(shippingFee);
+        order.setFulfillment("NEW");
         order = orderRepository.save(order);
 
         for (OrderItem oi : orderItems) {
@@ -126,7 +143,72 @@ public class OrderService {
             orderItemRepository.save(oi);
         }
         order.setItems(orderItems);
+        notifyTeam(order, orderItems);
         return order;
+    }
+
+    private static String trimTo(String s, int max) {
+        if (s == null || s.isBlank()) return null;
+        s = s.trim();
+        return s.length() > max ? s.substring(0, max) : s;
+    }
+
+    /** Emails every admin and staff member about a new order. A failure never blocks the order. */
+    private void notifyTeam(Order order, List<OrderItem> items) {
+        try {
+            List<String> to = userRepository.findAll().stream()
+                    .filter(u -> u.getRole() == UserRole.ADMIN || u.getRole() == UserRole.STAFF)
+                    .map(User::getEmail).filter(e -> e != null && !e.isBlank()).distinct().toList();
+            if (to.isEmpty()) return;
+            User customer = userRepository.findById(order.getCustomerId()).orElse(null);
+            Map<Long, Product> products = productRepository.findByIdIn(items.stream().map(OrderItem::getProductId).toList())
+                    .stream().collect(Collectors.toMap(Product::getId, p -> p));
+            StringBuilder rows = new StringBuilder();
+            for (OrderItem i : items) {
+                Product p = products.get(i.getProductId());
+                String name = p == null ? "#" + i.getProductId() : (p.getNameHe() != null ? p.getNameHe() : p.getName());
+                rows.append("<li>").append(esc(name)).append(" × ").append(i.getQuantity())
+                        .append(i.getSize() != null ? " · " + esc(i.getSize()) : "")
+                        .append(i.getColor() != null ? " · " + esc(i.getColor()) : "")
+                        .append(" — ₪").append(i.getUnitPrice().setScale(2, RoundingMode.HALF_UP)).append("</li>");
+            }
+            String html = "<div dir=\"rtl\" style=\"font-family:Arial,sans-serif\">"
+                    + "<h2>הזמנה חדשה #" + order.getId() + "</h2>"
+                    + "<p><b>לקוח:</b> " + esc(order.getShippingName()) + " · " + esc(order.getShippingPhone() != null ? order.getShippingPhone() : customer != null ? customer.getPhone() : null)
+                    + " · " + esc(customer != null ? customer.getEmail() : null) + "</p>"
+                    + "<p><b>כתובת:</b> " + esc(order.getShippingAddress()) + ", " + esc(order.getShippingCity()) + "</p>"
+                    + (order.getShippingNotes() != null ? "<p><b>הערות:</b> " + esc(order.getShippingNotes()) + "</p>" : "")
+                    + "<ul>" + rows + "</ul>"
+                    + "<p><b>סה\"כ:</b> ₪" + order.getTotalPrice().setScale(2, RoundingMode.HALF_UP)
+                    + (order.getShippingFee() != null && order.getShippingFee().signum() > 0 ? " (כולל משלוח ₪" + order.getShippingFee().setScale(2, RoundingMode.HALF_UP) + ")" : "")
+                    + "</p><p>לטיפול בהזמנה: תפריט ← ניהול הזמנות</p></div>";
+            for (String email : to) {
+                emailService.sendHtmlEmail(email, "הזמנה חדשה #" + order.getId() + " - JIBI", html);
+            }
+        } catch (Exception e) {
+            log.error("Failed to notify the team about order {}: {}", order.getId(), e.getMessage());
+        }
+    }
+
+    private static String esc(String s) {
+        if (s == null || s.isBlank()) return "-";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    /** Moves an order to NEW, PACKED, SHIPPED or DELIVERED. Admin and staff only. */
+    @Transactional
+    public Order updateFulfillment(Long orderId, String fulfillment, UserRole userRole) {
+        if (userRole != UserRole.ADMIN && userRole != UserRole.STAFF) {
+            throw new IllegalStateException("Only admin or staff can update orders");
+        }
+        String value = fulfillment == null ? "" : fulfillment.trim().toUpperCase();
+        if (!FULFILLMENT.contains(value)) {
+            throw new IllegalArgumentException("Invalid status: " + fulfillment);
+        }
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
+        order.setFulfillment(value);
+        return orderRepository.save(order);
     }
 
     @Transactional
@@ -159,8 +241,8 @@ public class OrderService {
     }
 
     public List<AdminOrderDetails> findAllOrdersDetailedForAdmin(UserRole userRole) {
-        if (userRole != UserRole.ADMIN) {
-            throw new IllegalStateException("Only admin can view all orders");
+        if (userRole != UserRole.ADMIN && userRole != UserRole.STAFF) {
+            throw new IllegalStateException("Only admin or staff can view all orders");
         }
 
         List<Order> orders = new ArrayList<>(orderRepository.findAll());
@@ -196,14 +278,20 @@ public class OrderService {
             for (OrderItem item : itemsByOrderId.getOrDefault(o.getId(), Collections.emptyList())) {
                 Product product = productById.get(item.getProductId());
                 String productName = product != null ? product.getName() : ("Product #" + item.getProductId());
-                itemDtos.add(new AdminOrderItemDetails(
+                AdminOrderItemDetails dto = new AdminOrderItemDetails(
                         item.getProductId(),
                         productName,
                         item.getQuantity(),
                         item.getUnitPrice(),
                         item.getSize(),
                         item.getColor()
-                ));
+                );
+                if (product != null) {
+                    dto.setProductNameHe(product.getNameHe());
+                    String urls = product.getImageUrls();
+                    dto.setImageUrl(urls == null || urls.isBlank() ? null : urls.split(",")[0].trim());
+                }
+                itemDtos.add(dto);
             }
             result.add(new AdminOrderDetails(
                     o.getId(),
@@ -216,7 +304,7 @@ public class OrderService {
                     o.getStatus(),
                     o.getCreatedAt(),
                     itemDtos
-            ));
+            ).withShipping(o));
         }
 
         return result;
@@ -304,6 +392,13 @@ public class OrderService {
         public BigDecimal getUnitPrice() { return unitPrice; }
         public String getSize() { return size; }
         public String getColor() { return color; }
+
+        private String productNameHe;
+        private String imageUrl;
+        public String getProductNameHe() { return productNameHe; }
+        public void setProductNameHe(String productNameHe) { this.productNameHe = productNameHe; }
+        public String getImageUrl() { return imageUrl; }
+        public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
     }
 
     public static class AdminOrderDetails {
@@ -343,5 +438,31 @@ public class OrderService {
         public OrderStatus getStatus() { return status; }
         public Instant getCreatedAt() { return createdAt; }
         public List<AdminOrderItemDetails> getItems() { return items; }
+
+        private String shippingName;
+        private String shippingPhone;
+        private String shippingCity;
+        private String shippingAddress;
+        private String shippingNotes;
+        private BigDecimal shippingFee;
+        private String fulfillment;
+        public String getShippingName() { return shippingName; }
+        public String getShippingPhone() { return shippingPhone; }
+        public String getShippingCity() { return shippingCity; }
+        public String getShippingAddress() { return shippingAddress; }
+        public String getShippingNotes() { return shippingNotes; }
+        public BigDecimal getShippingFee() { return shippingFee; }
+        public String getFulfillment() { return fulfillment; }
+
+        AdminOrderDetails withShipping(Order o) {
+            this.shippingName = o.getShippingName();
+            this.shippingPhone = o.getShippingPhone();
+            this.shippingCity = o.getShippingCity();
+            this.shippingAddress = o.getShippingAddress();
+            this.shippingNotes = o.getShippingNotes();
+            this.shippingFee = o.getShippingFee();
+            this.fulfillment = o.getFulfillment();
+            return this;
+        }
     }
 }

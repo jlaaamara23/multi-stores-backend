@@ -57,6 +57,28 @@ public class SchemaUpgrade {
         }
         run("categories (SHOES, LUGGAGE)", this::upgradeCategories);
         run("product drafts", this::upgradeDrafts);
+        run("user roles", this::upgradeUserRoles);
+    }
+
+    static final List<String> ROLES = java.util.Arrays.stream(com.example.multi_stores.entity.UserRole.values())
+            .map(Enum::name).toList();
+
+    /** Keeps the users.role CHECK constraint in line with the UserRole enum (e.g. adds STAFF). */
+    void upgradeUserRoles() {
+        if (!tableExists("users")) return;
+        List<String> defs = jdbc.queryForList(
+                "select conname || '|' || pg_get_constraintdef(oid) from pg_constraint "
+                        + "where conrelid = 'users'::regclass and contype = 'c' and pg_get_constraintdef(oid) ilike '%role%'",
+                String.class);
+        boolean current = defs.size() == 1 && defs.get(0).startsWith("users_role_check|")
+                && ROLES.stream().allMatch(r -> defs.get(0).contains("'" + r + "'"));
+        if (current) return;
+        if (defs.size() > 1 || (defs.size() == 1 && !defs.get(0).startsWith("users_role_check|"))) {
+            throw new IllegalStateException("unexpected role constraints " + defs + "; not changed");
+        }
+        jdbc.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check");
+        jdbc.execute("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('" + String.join("', '", ROLES) + "'))");
+        log.info("Schema upgrade: user roles updated to {}.", ROLES);
     }
 
     static final long ADVISORY_LOCK_KEY = 2026102801L;

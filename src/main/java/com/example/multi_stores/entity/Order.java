@@ -34,6 +34,28 @@ public class Order {
     @Column(name = "created_at")
     private Instant createdAt;
 
+    @Column(name = "shipping_name", length = 120)
+    private String shippingName;
+
+    @Column(name = "shipping_phone", length = 20)
+    private String shippingPhone;
+
+    @Column(name = "shipping_city", length = 80)
+    private String shippingCity;
+
+    @Column(name = "shipping_address", length = 200)
+    private String shippingAddress;
+
+    @Column(name = "shipping_notes", length = 300)
+    private String shippingNotes;
+
+    @Column(name = "shipping_fee", precision = 10, scale = 2)
+    private BigDecimal shippingFee;
+
+    /** Handling by the team: NEW, PACKED, SHIPPED or DELIVERED (null on orders made before this existed = NEW). */
+    @Column(name = "fulfillment", length = 20)
+    private String fulfillment;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> items = new ArrayList<>();
 
@@ -109,4 +131,18 @@ public class Order {
     public void setCustomer(User customer) { this.customer = customer; }
     public Store getStore() { return store; }
     public void setStore(Store store) { this.store = store; }
+    public String getShippingName() { return shippingName; }
+    public void setShippingName(String shippingName) { this.shippingName = shippingName; }
+    public String getShippingPhone() { return shippingPhone; }
+    public void setShippingPhone(String shippingPhone) { this.shippingPhone = shippingPhone; }
+    public String getShippingCity() { return shippingCity; }
+    public void setShippingCity(String shippingCity) { this.shippingCity = shippingCity; }
+    public String getShippingAddress() { return shippingAddress; }
+    public void setShippingAddress(String shippingAddress) { this.shippingAddress = shippingAddress; }
+    public String getShippingNotes() { return shippingNotes; }
+    public void setShippingNotes(String shippingNotes) { this.shippingNotes = shippingNotes; }
+    public BigDecimal getShippingFee() { return shippingFee; }
+    public void setShippingFee(BigDecimal shippingFee) { this.shippingFee = shippingFee; }
+    public String getFulfillment() { return fulfillment == null ? "NEW" : fulfillment; }
+    public void setFulfillment(String fulfillment) { this.fulfillment = fulfillment; }
 }

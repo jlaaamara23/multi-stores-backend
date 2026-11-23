@@ -91,7 +91,7 @@ public class User implements UserDetails {
     @Override
     /** Admins and owners can log in without email verification; others must be verified. */
     public boolean isEnabled() {
-        return emailVerified || role == UserRole.ADMIN || role == UserRole.OWNER;
+        return emailVerified || role == UserRole.ADMIN || role == UserRole.OWNER || role == UserRole.STAFF;
     }
 
     @Override
