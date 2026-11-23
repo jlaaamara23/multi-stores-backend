@@ -43,7 +43,7 @@ public class OrderController {
             List<OrderService.OrderItemInput> items = request.getItems().stream()
                     .map(i -> new OrderService.OrderItemInput(i.getProductId(), i.getQuantity(), i.getSize(), i.getColor()))
                     .collect(Collectors.toList());
-            Order order = orderService.createOrder(customerId, request.getStoreId(), items);
+            Order order = orderService.createOrder(customerId, request.getStoreId(), items, request.getShippingFee());
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                     "id", order.getId(),
                     "totalPrice", order.getTotalPrice(),
@@ -115,6 +115,8 @@ public class OrderController {
     public static class CreateOrderRequest {
         private Long storeId;
         private List<OrderItemDto> items;
+        /** Sent with one order of the checkout (the first); the others have none. */
+        private java.math.BigDecimal shippingFee;
 
         public CreateOrderRequest() {}
 
@@ -127,6 +129,8 @@ public class OrderController {
         public void setStoreId(Long storeId) { this.storeId = storeId; }
         public List<OrderItemDto> getItems() { return items; }
         public void setItems(List<OrderItemDto> items) { this.items = items; }
+        public java.math.BigDecimal getShippingFee() { return shippingFee; }
+        public void setShippingFee(java.math.BigDecimal shippingFee) { this.shippingFee = shippingFee; }
     }
 
     public static class OrderItemDto {

@@ -52,8 +52,21 @@ public class OrderService {
         this.invoiceService = invoiceService;
     }
 
+    /** Delivery fee charged once per checkout when the whole cart is below FREE_SHIPPING_FROM. */
+    public static final BigDecimal SHIPPING_FEE = new BigDecimal("50");
+    public static final BigDecimal FREE_SHIPPING_FROM = new BigDecimal("500");
+
     @Transactional
     public Order createOrder(Long customerId, Long storeId, List<OrderItemInput> items) {
+        return createOrder(customerId, storeId, items, null);
+    }
+
+    /** shippingFee may only be empty, 0 or SHIPPING_FEE; it is added to this order's total. */
+    @Transactional
+    public Order createOrder(Long customerId, Long storeId, List<OrderItemInput> items, BigDecimal shippingFee) {
+        if (shippingFee != null && shippingFee.signum() != 0 && shippingFee.compareTo(SHIPPING_FEE) != 0) {
+            throw new IllegalArgumentException("Invalid shipping fee");
+        }
         BigDecimal totalPrice = BigDecimal.ZERO;
         List<OrderItem> orderItems = new ArrayList<>();
 
@@ -93,6 +106,10 @@ public class OrderService {
         BigDecimal minimumOrder = new BigDecimal("80");
         if (totalPrice.compareTo(minimumOrder) < 0) {
             throw new IllegalStateException("Minimum order is ₪80. Your total is ₪" + totalPrice.setScale(2, java.math.RoundingMode.HALF_UP) + ".");
+        }
+
+        if (shippingFee != null) {
+            totalPrice = totalPrice.add(shippingFee);
         }
 
         Order order = Order.builder()
