@@ -39,11 +39,17 @@ public class OrderController {
         if (request.getStoreId() == null || request.getItems() == null || request.getItems().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Store and items are required"));
         }
+        if (request.getShipping() == null || blank(request.getShipping().getName())
+                || blank(request.getShipping().getCity()) || blank(request.getShipping().getAddress())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Name, city and address for delivery are required"));
+        }
         try {
             List<OrderService.OrderItemInput> items = request.getItems().stream()
                     .map(i -> new OrderService.OrderItemInput(i.getProductId(), i.getQuantity(), i.getSize(), i.getColor()))
                     .collect(Collectors.toList());
-            Order order = orderService.createOrder(customerId, request.getStoreId(), items, request.getShippingFee());
+            Order order = orderService.createOrder(customerId, request.getStoreId(), items, request.getShippingFee(),
+                    new OrderService.Shipping(request.getShipping().getName(), request.getShipping().getCity(),
+                            request.getShipping().getAddress(), request.getShipping().getNotes()));
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                     "id", order.getId(),
                     "totalPrice", order.getTotalPrice(),
@@ -74,6 +80,30 @@ public class OrderController {
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
         }
+    }
+
+    @PatchMapping("/{id}/fulfillment")
+    public ResponseEntity<Map<String, Object>> updateFulfillment(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        User user = getAuthUser(userDetails);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not authenticated"));
+        }
+        try {
+            Order order = orderService.updateFulfillment(id, body == null ? null : body.get("fulfillment"), user.getRole());
+            return ResponseEntity.ok(Map.of("id", order.getId(), "fulfillment", order.getFulfillment()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    private static boolean blank(String s) {
+        return s == null || s.isBlank();
     }
 
     @DeleteMapping("/{id}")
@@ -117,6 +147,7 @@ public class OrderController {
         private List<OrderItemDto> items;
         /** Sent with one order of the checkout (the first); the others have none. */
         private java.math.BigDecimal shippingFee;
+        private ShippingDto shipping;
 
         public CreateOrderRequest() {}
 
@@ -131,6 +162,26 @@ public class OrderController {
         public void setItems(List<OrderItemDto> items) { this.items = items; }
         public java.math.BigDecimal getShippingFee() { return shippingFee; }
         public void setShippingFee(java.math.BigDecimal shippingFee) { this.shippingFee = shippingFee; }
+        public ShippingDto getShipping() { return shipping; }
+        public void setShipping(ShippingDto shipping) { this.shipping = shipping; }
+    }
+
+    public static class ShippingDto {
+        private String name;
+        private String city;
+        private String address;
+        private String notes;
+
+        public ShippingDto() {}
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getCity() { return city; }
+        public void setCity(String city) { this.city = city; }
+        public String getAddress() { return address; }
+        public void setAddress(String address) { this.address = address; }
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
     }
 
     public static class OrderItemDto {
